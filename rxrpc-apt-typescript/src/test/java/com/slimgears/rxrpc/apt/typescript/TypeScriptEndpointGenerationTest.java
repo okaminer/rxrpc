@@ -1,17 +1,23 @@
-package com.slimgears.rxrpc.apt.typescript; /**
- *
- */
+package com.slimgears.rxrpc.apt.typescript;
 
 import com.slimgears.apt.util.AnnotationProcessingTester;
+import com.slimgears.apt.util.StoreWrittenFilesRule;
 import com.slimgears.rxrpc.apt.TestBundles;
 import com.slimgears.util.generic.ScopedInstance;
+import com.slimgears.util.test.logging.LogLevel;
+import com.slimgears.util.test.logging.UseLogLevel;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.ClassRule;
 import org.junit.Test;
 import org.slf4j.event.Level;
 
 public class TypeScriptEndpointGenerationTest {
     private ScopedInstance.Closeable classTrackerDisposable;
+
+    @ClassRule
+    public final static StoreWrittenFilesRule storeWrittenFilesRule = StoreWrittenFilesRule
+            .forPath("build/test-results/files");
 
     @Before
     public void setUp() {
@@ -37,7 +43,7 @@ public class TypeScriptEndpointGenerationTest {
                         "sample-enum.ts",
                         "sample-array.ts",
                         "index.ts",
-                        "module.ts",
+                        "rx-rpc-generated-client-module.ts",
                         "tsconfig.json")
                 .test();
     }
@@ -50,6 +56,7 @@ public class TypeScriptEndpointGenerationTest {
                         "sample-generic-data.ts",
                         "sample-generic-list.ts",
                         "sample-generic-endpoint.ts",
+//                        "sample-specialized-data.ts",
                         "sample-specialized-endpoint.ts",
                         "sample-specialized-endpoint-client.ts")
                 .test();
@@ -64,6 +71,7 @@ public class TypeScriptEndpointGenerationTest {
     }
 
     @Test
+    @UseLogLevel(LogLevel.TRACE)
     public void testNestedDataGeneration() {
         TestBundles.sampleNestedDataEndpointTester()
                 .apply(this::typeScriptOptions)
@@ -108,7 +116,7 @@ public class TypeScriptEndpointGenerationTest {
     public void testEndpointModuleGeneration() {
         TestBundles.sampleEndpointModuleTester()
                 .apply(this::typeScriptOptions)
-                .expectedFiles("module.ts")
+                .expectedFiles("rx-rpc-generated-client-module.ts")
                 .test();
     }
 

@@ -1,15 +1,66 @@
-apply from: "$scriptsDir/java.gradle"
+import java.util.concurrent.Callable
 
-tasks.withType(JavaCompile) {
-    options.compilerArgs = [
-            //"-Averbosity=ALL",
-            "-Arxrpc.java.client",
-            "-Arxrpc.java.server",
-            "-Arxrpc.java.autoservice"]
+apply from: "$scriptsDir/java.gradle"
+apply from: "$scriptsDir/nodejs.gradle"
+
+node {
+    nodeModulesDir = project.file("$project.projectDir/frontend")
+}
+
+compileJava.options.compilerArgs = [
+        "-Arxrpc.ts.typemaps=$projectDir/src/main/typemap/types.properties",
+        '-Arxrpc.ts.ngmodule',
+        '-Arxrpc.ts.ngmodule.name=BackendApiModule'
+]
+
+task syncBackendApi(type: Sync) {
+    dependsOn(compileJava)
+    from fileTree(dir: "$project.buildDir/generated/source/apt/main/typescript", include: '*.ts')
+    into file("$node.nodeModulesDir/src/backend-api")
+}
+
+task yarnCleanCache(type: YarnTask) {
+    args = ['cache', 'clean']
+}
+
+clean.dependsOn(yarnCleanCache)
+
+task yarnInstallRxRpcJs(type: YarnTask, dependsOn: yarn) {
+    def rxrpcJsProj = project.project(':rxrpc-js')
+    inputs.file rxrpcJsProj.packageFile
+    outputs.dir "$node.nodeModulesDir/node_modules/rxrpc-js"
+    dependsOn(rxrpcJsProj.yarnPack)
+    args = ['add', "file:$rxrpcJsProj.packageFile"]
+
+    doFirst {
+        copy {
+            from ("${node.nodeModulesDir}/yarn.lock", "${node.nodeModulesDir}/package.json")
+            into "${node.nodeModulesDir}"
+            rename { name -> "${name}.tmp" }
+        }
+    }
+
+    doLast {
+        copy {
+            from ("${node.nodeModulesDir}/yarn.lock.tmp", "${node.nodeModulesDir}/package.json.tmp")
+            into "${node.nodeModulesDir}"
+            rename { name -> name.replace(".tmp", "") }
+        }
+        delete {
+            delete "${node.nodeModulesDir}/yarn.lock.tmp", "${node.nodeModulesDir}/package.json.tmp"
+        }
+    }
+}
+
+yarnBuild {
+    dependsOn(yarnInstallRxRpcJs, yarn, syncBackendApi)
+    inputs.file file("$node.nodeModulesDir/angular.json")
+    inputs.files fileTree("$node.nodeModulesDir/src")
+    outputs.files fileTree("$buildDir/resources/main/web")
 }
 
 dependencies {
-    //annotationProcessor project(':rxrpc-apt-typescript')
+    annotationProcessor project(':rxrpc-apt-typescript')
     annotationProcessor project(':rxrpc-apt-java')
     implementation project(':rxrpc-core')
     implementation project(':rxrpc-jetty-websocket')
@@ -18,13 +69,11 @@ dependencies {
     implementation libs.jacksonCore
     implementation libs.jacksonDataBind
     implementation libs.jacksonAnnotations
+    implementation libs.slimGenericUtils
 
     implementation libs.jettyServer, libs.jettyServlet
-    implementation libs.logbackClassic, libs.logbackCore
 
-    compileOnly libs.autoService
-    annotationProcessor libs.autoService
-
+    testImplementation libs.commonsIo
     compileOnly libs.autoValueAnnotations
     annotationProcessor libs.autoValue
 }

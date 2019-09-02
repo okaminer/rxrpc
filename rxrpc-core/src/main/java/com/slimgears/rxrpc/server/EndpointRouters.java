@@ -6,7 +6,7 @@ import com.slimgears.rxrpc.server.internal.CompositeEndpointRouter;
 import com.slimgears.rxrpc.server.internal.InvocationArguments;
 import com.slimgears.rxrpc.server.internal.MethodDispatcher;
 import com.slimgears.util.generic.ServiceResolver;
-import com.slimgears.util.reflect.TypeToken;
+import com.google.common.reflect.TypeToken;
 import com.slimgears.util.stream.Safe;
 import com.slimgears.util.stream.Streams;
 import org.reactivestreams.Publisher;
@@ -34,11 +34,12 @@ import java.util.stream.Stream;
 
 import static com.slimgears.util.stream.Streams.ofType;
 
+@SuppressWarnings("WeakerAccess")
 public class EndpointRouters {
     private final static Logger log = LoggerFactory.getLogger(EndpointRouters.class);
-    public final static EndpointRouter EMPTY = (resolver, path, args) -> { throw new NoSuchMethodError(path); };
-    public final static EndpointRouter.Module EMPTY_MODULE = config -> {};
-    public final static MethodDispatcher.Decorator EMPTY_DECORATOR = new MethodDispatcher.Decorator() {
+    public final static EndpointRouter empty = (resolver, path, args) -> { throw new NoSuchMethodError(path); };
+    public final static EndpointRouter.Module emptyModule = config -> {};
+    public final static MethodDispatcher.Decorator emptyDecorator = new MethodDispatcher.Decorator() {
         @Override
         public <R> Publisher<R> decorate(Supplier<Publisher<R>> publisher, ServiceResolver resolver) {
             return publisher.get();
@@ -68,8 +69,7 @@ public class EndpointRouters {
                     .toArray(EndpointRouter.Module[]::new);
             return modules(modules);
         } catch (IOException e) {
-            log.warn("Could not read modules from {}: {}", resourcePath, e);
-            return EMPTY_MODULE;
+            throw new RuntimeException("Could not read modules from " + resourcePath, e);
         }
     }
 
@@ -90,7 +90,10 @@ public class EndpointRouters {
         ServiceLoader<EndpointRouter.Module> serviceLoader = ServiceLoader.load(
                 EndpointRouter.Module.class, EndpointRouters.class.getClassLoader());
 
-        return config -> serviceLoader.forEach(module -> module.configure(config));
+        return config -> serviceLoader.forEach(module -> {
+            log.debug("Discovered module: {}", module.getClass().getSimpleName());
+            module.configure(config);
+        });
     }
 
     public static class Builder<T> {
@@ -121,8 +124,8 @@ public class EndpointRouters {
             return Builder.this::dispatch;
         }
 
+        @SuppressWarnings("unchecked")
         private <R> Publisher<R> dispatch(ServiceResolver resolver, String method, InvocationArguments args) {
-            //noinspection unchecked
             Supplier<Publisher<R>> publisherSupplier = Optional
                     .ofNullable(methodDispatcherMap.get(method))
                     .<Supplier<Publisher<R>>>map(dispatcher -> () -> (Publisher<R>)dispatcher.dispatch(resolver, resolver.resolve(endpointType), args))
@@ -130,7 +133,7 @@ public class EndpointRouters {
 
             MethodDispatcher.Decorator decorator = Optional
                     .ofNullable(methodDecoratorMap.get(method))
-                    .orElse(EMPTY_DECORATOR);
+                    .orElse(emptyDecorator);
 
             return decorator.decorate(publisherSupplier, resolver);
         }
@@ -173,8 +176,8 @@ public class EndpointRouters {
             this.annotation = annotation;
         }
 
+        @SuppressWarnings("unchecked")
         static <A extends Annotation> DecorationItem<A> create(Class<? extends RxDecorator<? extends Annotation>> decoratorClass, Annotation annotation) {
-            //noinspection unchecked
             return new DecorationItem<>((Class<? extends RxDecorator<A>>)decoratorClass, (A)annotation);
         }
     }
@@ -193,7 +196,7 @@ public class EndpointRouters {
 
         public DecoratorBuilder<T> method(String name, Class... args) {
             try {
-                Method method = endpointType.asClass().getMethod(name, args);
+                Method method = endpointType.getRawType().getMethod(name, args);
                 Arrays.stream(method.getAnnotations())
                         .flatMap(a -> Optional
                                 .ofNullable(a.annotationType().getAnnotation(RxRpcDecorator.class))
@@ -211,7 +214,7 @@ public class EndpointRouters {
             return decorationItems.stream()
                     .map(this::buildDecorator)
                     .reduce(EndpointRouters::combineDecorators)
-                    .orElse(EMPTY_DECORATOR);
+                    .orElse(emptyDecorator);
         }
 
         private <A extends Annotation> MethodDispatcher.Decorator buildDecorator(DecorationItem<A> item) {

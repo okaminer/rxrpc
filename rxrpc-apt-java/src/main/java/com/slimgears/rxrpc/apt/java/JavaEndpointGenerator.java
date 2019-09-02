@@ -1,39 +1,30 @@
-/**
- *
- */
 package com.slimgears.rxrpc.apt.java;
 
 import com.google.auto.service.AutoService;
+import com.google.common.base.Strings;
 import com.slimgears.apt.data.TypeInfo;
 import com.slimgears.apt.util.ElementUtils;
 import com.slimgears.apt.util.ImportTracker;
 import com.slimgears.apt.util.JavaUtils;
 import com.slimgears.apt.util.TemplateEvaluator;
 import com.slimgears.rxrpc.apt.EndpointGenerator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.processing.SupportedOptions;
 
+@SuppressWarnings("WeakerAccess")
 @AutoService(EndpointGenerator.class)
-@SupportedOptions({
-        JavaEndpointGenerator.generateClientOption,
-        JavaEndpointGenerator.generateServerOption,
-        JavaEndpointGenerator.useAutoServiceOption
-})
 public class JavaEndpointGenerator implements EndpointGenerator {
+    private final static Logger log = LoggerFactory.getLogger(JavaEndpointGenerator.class);
+
     static final String rxModuleClassSuffix = "_RxModule";
     static final String rxClientClassSuffix = "_RxClient";
-    static final String generateClientOption = "rxrpc.java.client";
-    static final String generateServerOption = "rxrpc.java.server";
-    static final String useAutoServiceOption = "rxrpc.java.autoservice";
 
     @Override
     public void generate(Context context) {
-        if (context.hasOption(generateClientOption) && context.meta().generateClient()) {
-            generateClass(context, rxClientClassSuffix, "java-client.java.vm");
-        }
-        if (context.hasOption(generateServerOption) && context.meta().generateServer()) {
-            generateClass(context, rxModuleClassSuffix, "java-server.java.vm");
-        }
+        generateClass(context, rxClientClassSuffix, "java-client.java.vm");
+        generateClass(context, rxModuleClassSuffix, "java-server.java.vm");
     }
 
     static TypeInfo rxModuleFromEndpoint(TypeInfo endpointClass) {
@@ -50,10 +41,9 @@ public class JavaEndpointGenerator implements EndpointGenerator {
         TemplateEvaluator
                 .forResource(templatePath)
                 .variables(context)
-                .variable("hasModuleName", context.moduleName() != null)
+                .variable("hasModuleName", !Strings.isNullOrEmpty(context.moduleName()))
                 .variable("isInterface", ElementUtils.isInterface(context.sourceTypeElement()))
                 .variable("javaUtils", new JavaUtils())
-                .variable("autoService", context.hasOption(useAutoServiceOption))
                 .variable("targetClass", targetClass)
                 .apply(JavaUtils.imports(importTracker))
                 //.postProcess(JavaUtils.formatter())

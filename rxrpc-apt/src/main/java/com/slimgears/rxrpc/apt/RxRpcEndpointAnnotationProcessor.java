@@ -1,11 +1,12 @@
 package com.slimgears.rxrpc.apt;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.auto.common.MoreElements;
 import com.google.auto.common.MoreTypes;
 import com.google.auto.service.AutoService;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Sets;
 import com.slimgears.apt.AbstractAnnotationProcessor;
 import com.slimgears.apt.data.Environment;
 import com.slimgears.apt.data.MethodInfo;
@@ -18,21 +19,20 @@ import com.slimgears.rxrpc.apt.util.ServiceProviders;
 import com.slimgears.rxrpc.apt.util.TemplateUtils;
 import com.slimgears.rxrpc.core.RxRpcEndpoint;
 import com.slimgears.rxrpc.core.RxRpcMethod;
+import com.slimgears.util.stream.Optionals;
 import com.slimgears.util.stream.Streams;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.processing.Processor;
 import javax.annotation.processing.SupportedAnnotationTypes;
-import javax.lang.model.element.ExecutableElement;
-import javax.lang.model.element.Name;
-import javax.lang.model.element.TypeElement;
+import javax.lang.model.element.*;
 import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.ExecutableType;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import javax.lang.model.type.TypeMirror;
+import javax.tools.Diagnostic;
+import java.util.*;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -40,6 +40,7 @@ import java.util.stream.Stream;
 @AutoService(Processor.class)
 @SupportedAnnotationTypes("com.slimgears.rxrpc.core.RxRpcEndpoint")
 public class RxRpcEndpointAnnotationProcessor extends AbstractAnnotationProcessor {
+    private final static Logger log = LoggerFactory.getLogger(RxRpcEndpointAnnotationProcessor.class);
     private final Collection<EndpointGenerator> endpointGenerators;
     private final Collection<CodeGenerationFinalizer> finalizers;
     private final Collection<DataClassGenerator> dataClassGenerators;
@@ -63,7 +64,13 @@ public class RxRpcEndpointAnnotationProcessor extends AbstractAnnotationProcesso
                 .propertiesFrom(getOptions(typeElement))
                 .build()) {
             EndpointGenerator.Context context = createContext(annotationType, typeElement);
-            endpointGenerators.forEach(cg -> cg.generate(context));
+            endpointGenerators.forEach(cg -> {
+                try {
+                    cg.generate(context);
+                } catch (Throwable e) {
+                    Environment.instance().messager().printMessage(Diagnostic.Kind.ERROR, e.getMessage());
+                }
+            });
         }
         return true;
     }
@@ -79,8 +86,15 @@ public class RxRpcEndpointAnnotationProcessor extends AbstractAnnotationProcesso
 
         log.info("Generating from: {}", typeElement.getQualifiedName());
 
-        ElementUtils
-                .getReferencedTypes(typeElement)
+        DeclaredType declaredType = MoreTypes.asDeclared(typeElement.asType());
+
+        Stream.concat(
+                propertyElementsFromTypeElement(typeElement)
+                        .map(el -> propertyTypeFromElement(declaredType, el))
+                        .flatMap(ElementUtils::getReferencedTypeParams)
+                        .flatMap(ElementUtils::toTypeElement),
+                ElementUtils.getHierarchy(typeElement))
+                .filter(ElementUtils::isUnknownType)
                 .forEach(this::generateDataType);
 
         DataClassGenerator.Context.Builder builder = DataClassGenerator.Context.builder()
@@ -88,19 +102,10 @@ public class RxRpcEndpointAnnotationProcessor extends AbstractAnnotationProcesso
                 .sourceTypeElement(typeElement)
                 .environment(processingEnv);
 
-        Collection<PropertyInfo> allProperties = typeElement.getInterfaces()
-                .stream()
-                .map(MoreTypes::asDeclared)
-                .flatMap(iface -> MoreElements
-                        .getLocalAndInheritedMethods(MoreElements.asType(iface.asElement()), Environment.instance().types(), Environment.instance().elements())
-                        .stream()
-                        .filter(element -> ElementUtils.isUnknownType(MoreElements.asType(element.getEnclosingElement())))
-                        .filter(ElementUtils::isNotStatic)
-                        .filter(ElementUtils::isPublic)
-                        .filter(element -> !ElementUtils.hasAnnotation(element, JsonIgnore.class))
-                        .map(element -> PropertyInfo.fromElement(iface, element))
-                        .filter(Optional::isPresent)
-                        .map(Optional::get))
+        Collection<PropertyInfo> allProperties = inheritedAndLocalPropertyElements(typeElement)
+                .map(element -> PropertyInfo.fromElement(declaredType, element))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
                 .distinct()
                 .collect(Collectors.toList());
 
@@ -110,6 +115,7 @@ public class RxRpcEndpointAnnotationProcessor extends AbstractAnnotationProcesso
                 .filter(ElementUtils::isPublic)
                 .filter(element -> !ElementUtils.hasAnnotation(element, Override.class))
                 .filter(element -> !ElementUtils.hasAnnotation(element, JsonIgnore.class))
+                .filter(element -> !element.getModifiers().contains(Modifier.DEFAULT))
                 .map(PropertyInfo::fromElement)
                 .filter(Optional::isPresent)
                 .map(Optional::get)
@@ -123,6 +129,76 @@ public class RxRpcEndpointAnnotationProcessor extends AbstractAnnotationProcesso
         builder.allPropertiesBuilder().addAll(allProperties);
         DataClassGenerator.Context context = builder.build();
         dataClassGenerators.forEach(g -> g.generate(context));
+    }
+
+    private TypeMirror propertyTypeFromElement(DeclaredType type, Element element) {
+        return Optionals
+                .or(
+                        () -> Optional.of(element)
+                                .flatMap(Optionals.ofType(ExecutableElement.class))
+                                .map(el -> Environment.instance().types().asMemberOf(type, el))
+                                .map(MoreTypes::asExecutable)
+                                .map(ExecutableType::getReturnType),
+                        () -> Optional.of(element)
+                                .flatMap(Optionals.ofType(VariableElement.class))
+                                .map(el -> Environment.instance().types().asMemberOf(type, el))
+                )
+                .orElseThrow(() -> new IllegalArgumentException("Element kind " + element.getKind() + " is not supported as a property element"));
+    }
+
+    @SuppressWarnings("UnstableApiUsage")
+    private Stream<? extends Element> propertyElementsFromTypeElement(TypeElement typeElement) {
+        return Stream.concat(
+                typeElement
+                        .getEnclosedElements()
+                        .stream()
+                        .flatMap(Streams.ofType(ExecutableElement.class))
+                        .filter(element -> ElementUtils.isUnknownType(MoreElements.asType(element.getEnclosingElement())))
+                                .filter(ElementUtils::isNotStatic)
+                                .filter(ElementUtils::isPublic)
+                                .filter(element -> element.getParameters().isEmpty())
+                                .filter(element -> !ElementUtils.hasAnnotation(element, JsonIgnore.class))
+                                .filter(element ->
+                                        !element.getModifiers().contains(Modifier.DEFAULT) ||
+                                        ElementUtils.hasAnnotation(element, JsonProperty.class))
+                                .filter(element -> !element.getReturnType().toString().equals(Void.class.getName()))
+                                .filter(element -> !element.getReturnType().toString().equals(void.class.getName())),
+                typeElement
+                        .getEnclosedElements()
+                        .stream()
+                        .flatMap(Streams.ofType(VariableElement.class))
+                        .filter(ElementUtils::isNotStatic)
+                        .filter(ElementUtils::isPublic)
+                        .filter(element -> !ElementUtils.hasAnnotation(element, JsonIgnore.class)));
+    }
+
+    private Stream<? extends Element> inheritedAndLocalPropertyElements(TypeElement typeElement) {
+        return inheritedAndLocalPropertyElements(typeElement.asType(), Sets.newHashSet(), Sets.newHashSet());
+    }
+
+    private Stream<? extends Element> inheritedAndLocalPropertyElements(TypeMirror type, Set<TypeMirror> visitedInterfaces, Set<String> visitedProperties) {
+        if (!(type instanceof DeclaredType) || type.toString().equals(Object.class.getName())) {
+            return Stream.empty();
+        }
+
+        TypeElement typeElement = MoreTypes.asTypeElement(type);
+
+        return (typeElement.asType().toString().equals(Object.class.getName()))
+                ? Stream.empty()
+                : Stream.of(
+                propertyElementsFromTypeElement(typeElement)
+                        .filter(element -> PropertyInfo
+                                .fromElement(element)
+                                .map(PropertyInfo::name)
+                                .map(visitedProperties::add)
+                                .orElse(false)),
+                inheritedAndLocalPropertyElements(typeElement.getSuperclass(), visitedInterfaces, visitedProperties),
+                typeElement.getInterfaces()
+                        .stream()
+                        .filter(Objects::nonNull)
+                        .filter(visitedInterfaces::add)
+                        .flatMap(iface -> inheritedAndLocalPropertyElements(iface, visitedInterfaces, visitedProperties)))
+                .flatMap(Function.identity());
     }
 
     protected void onComplete() {
@@ -141,7 +217,8 @@ public class RxRpcEndpointAnnotationProcessor extends AbstractAnnotationProcesso
         finalizers.clear();
     }
 
-    protected EndpointGenerator.Context createContext(TypeElement annotationType, TypeElement typeElement) {
+    @SuppressWarnings("UnstableApiUsage")
+    private EndpointGenerator.Context createContext(TypeElement annotationType, TypeElement typeElement) {
         DeclaredType declaredType = (DeclaredType)typeElement.asType();
         RxRpcEndpoint annotation = typeElement.getAnnotation(RxRpcEndpoint.class);
 
@@ -158,9 +235,7 @@ public class RxRpcEndpointAnnotationProcessor extends AbstractAnnotationProcesso
 
         String moduleName = getModuleName(typeElement);
         moduleContextBuilder.sourceTypeElement(annotationType);
-        if (!Strings.isNullOrEmpty(moduleName)) {
-            moduleContextBuilder.addModule(moduleName, TypeInfo.of(declaredType), annotation);
-        }
+        moduleContextBuilder.addModule(moduleName, TypeInfo.of(declaredType), annotation);
 
         return EndpointGenerator.Context.builder()
                 .processorClass(getClass())
@@ -197,8 +272,7 @@ public class RxRpcEndpointAnnotationProcessor extends AbstractAnnotationProcesso
         return Optional
                 .ofNullable(typeElement.getAnnotation(RxRpcEndpoint.class))
                 .map(RxRpcEndpoint::module)
-                .filter(n -> !n.isEmpty())
-                .orElse(null);
+                .orElse("");
     }
 
     private String endpointNameFromClass(TypeElement typeElement) {
@@ -207,6 +281,21 @@ public class RxRpcEndpointAnnotationProcessor extends AbstractAnnotationProcesso
 
     private ExecutableElement ensureReferencedTypesGenerated(ExecutableElement element, DeclaredType declaredType) {
         ExecutableType executableType = (ExecutableType) Environment.instance().types().asMemberOf(declaredType, element);
+        if (executableType.getParameterTypes().stream().anyMatch(ElementUtils::hasErrors)) {
+            delayProcessing(executableType.getParameterTypes().stream()
+                    .filter(ElementUtils::hasErrors)
+                    .collect(Collectors.toList()));
+        }
+
+        List<TypeMirror> errorTypes = Stream.concat(
+                Stream.of(executableType.getReturnType()),
+                executableType.getParameterTypes().stream())
+                .filter(ElementUtils::hasErrors)
+                .collect(Collectors.toList());
+
+        if (!errorTypes.isEmpty()) {
+            delayProcessing(errorTypes);
+        }
 
         Stream.of(
                 ElementUtils.getReferencedTypes(element),

@@ -31,9 +31,13 @@ import java.util.stream.Stream;
 import static com.slimgears.util.stream.Streams.ofType;
 
 @AutoService(EndpointGenerator.class)
-@SupportedOptions(TypeScriptEndpointGenerator.generateNgModuleOption)
+@SupportedOptions({
+        TypeScriptEndpointGenerator.generateNgModuleOption,
+        TypeScriptEndpointGenerator.typeMapsOption
+})
 public class TypeScriptEndpointGenerator implements EndpointGenerator {
     static final String generateNgModuleOption = "rxrpc.ts.ngmodule";
+    static final String typeMapsOption = "rxrpc.ts.typemaps";
 
     private final static Logger log = LoggerFactory.getLogger(TypeScriptEndpointGenerator.class);
     private final Collection<TypeElement> generatedInterfaces = new HashSet<>();
@@ -82,6 +86,7 @@ public class TypeScriptEndpointGenerator implements EndpointGenerator {
 
         String ngModuleName = Optional
                 .ofNullable(context.moduleName())
+                .filter(m -> !m.isEmpty())
                 .map(TypeScriptModuleGenerator::toModuleClassName)
                 .orElse(null);
 
@@ -94,7 +99,7 @@ public class TypeScriptEndpointGenerator implements EndpointGenerator {
                 .variable("interfaces", interfaceProvider.apply(typeScriptUtils))
                 .variables(context)
                 .apply(typeScriptUtils.imports(importTracker))
-                .write(TypeScriptUtils.fileWriter(context.environment(), filename));
+                .write(TypeScriptUtils.fileWriter(filename));
 
         GeneratedClassTracker.current().addClass(
                 TypeInfo.of(context.sourceTypeElement()),

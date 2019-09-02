@@ -19,7 +19,8 @@ public class TestBundles {
                         "SampleEndpoint.java",
                         "SampleRequest.java",
                         "SampleData.java",
-                        "SampleEnum.java");
+                        "SampleEnum.java",
+                        "SampleGenericData.java");
     }
 
     public static AnnotationProcessingTester sampleSpecializedEndpointTester() {
@@ -28,6 +29,7 @@ public class TestBundles {
                         "SampleGenericData.java",
                         "SampleGenericList.java",
                         "SampleGenericEndpoint.java",
+                        "SampleSpecializedData.java",
                         "SampleSpecializedEndpoint.java");
     }
 
@@ -92,6 +94,7 @@ public class TestBundles {
                 .inputFiles(
                         "SampleEnum.java",
                         "SampleData.java",
+                        "SampleGenericData.java",
                         "SampleMapData.java",
                         "SampleMapEndpoint.java");
     }

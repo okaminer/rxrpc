@@ -12,13 +12,12 @@ import com.slimgears.rxrpc.core.data.Result;
 import com.slimgears.rxrpc.core.util.HasObjectMapper;
 import com.slimgears.rxrpc.core.util.MoreDisposables;
 import com.slimgears.util.generic.ServiceResolver;
-import com.slimgears.util.reflect.TypeToken;
+import com.google.common.reflect.TypeToken;
 import io.reactivex.BackpressureStrategy;
 import io.reactivex.Observable;
 import io.reactivex.Observer;
 import io.reactivex.Single;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.subjects.CompletableSubject;
 import io.reactivex.subjects.ReplaySubject;
 import io.reactivex.subjects.Subject;
 import org.reactivestreams.Publisher;
@@ -34,7 +33,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 public class RxClient {
@@ -104,7 +102,8 @@ public class RxClient {
     public Single<ServiceResolver> connect(URI uri) {
         Single<RxTransport> transport = this.config.client().connect(uri);
         return transport
-                .map(tr -> new InternalEndpointResolver(new DeferredSession(Single.just(tr))));
+                .<ServiceResolver>map(tr -> new InternalEndpointResolver(new InternalSession(tr)))
+                .cache();
     }
 
     private class InternalEndpointResolver implements ServiceResolver {
@@ -130,36 +129,6 @@ public class RxClient {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-        }
-    }
-
-    private class DeferredSession implements Session {
-        private final Single<Session> session;
-        private final AtomicReference<Session> sessionInstance = new AtomicReference<>();
-        private final CompletableSubject cancellation = CompletableSubject.create();
-
-        private DeferredSession(Single<RxTransport> transport) {
-            this.session = transport
-                    .<Session>map(InternalSession::new)
-                    .takeUntil(cancellation)
-                    .doOnSuccess(sessionInstance::set)
-                    .cache();
-        }
-
-        @Override
-        public Publisher<Result> invoke(String method, Map<String, Object> args) {
-            return session.flatMapPublisher(s -> s.invoke(method, args));
-        }
-
-        @Override
-        public Config clientConfig() {
-            return config;
-        }
-
-        @Override
-        public void close() {
-            cancellation.onComplete();
-            Optional.ofNullable(sessionInstance.get()).ifPresent(Session::close);
         }
     }
 

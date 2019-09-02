@@ -3,24 +3,14 @@
  */
 package com.slimgears.rxrpc.apt.typescript;
 
+import com.slimgears.apt.data.Environment;
 import com.slimgears.apt.data.TypeInfo;
-import com.slimgears.apt.util.ImportTracker;
-import com.slimgears.apt.util.LogUtils;
-import com.slimgears.apt.util.TemplateEvaluator;
-import com.slimgears.apt.util.TypeConverter;
-import com.slimgears.apt.util.TypeConverters;
+import com.slimgears.apt.util.*;
 import com.slimgears.rxrpc.apt.util.TemplateUtils;
-import com.slimgears.util.stream.Safe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.processing.Filer;
-import javax.annotation.processing.ProcessingEnvironment;
-import javax.tools.FileObject;
-import javax.tools.StandardLocation;
-import java.io.BufferedWriter;
-import java.io.IOException;
-import java.io.Writer;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Optional;
 import java.util.TreeMap;
@@ -61,8 +51,14 @@ public class TypeScriptUtils extends TemplateUtils {
         return tsType;
     }
 
-    public static Consumer<String> fileWriter(ProcessingEnvironment environment, String filename) {
-        return content -> writeFile(environment, filename, content.trim() + "\n");
+    public static Consumer<String> fileWriter(String filename) {
+        String directory = Optional
+                .ofNullable(Environment.instance().processingEnvironment().getOptions().get("tsOutDir"))
+                .map(dir -> Paths.get(dir, filename))
+                .map(Path::toString)
+                .orElse("typescript");
+
+        return FileUtils.fileWriter(directory + "/" + filename);
     }
 
     public Function<TemplateEvaluator, TemplateEvaluator> imports(ImportTracker importTracker) {
@@ -103,32 +99,12 @@ public class TypeScriptUtils extends TemplateUtils {
         return code.replace(importTracker.toString(), importsStr);
     }
 
-    public static void writeFile(ProcessingEnvironment environment, String filename, String content) {
-        log.info("Writing file: {}", filename);
-        LogUtils.dumpContent(content);
-
-        Filer filer = environment.getFiler();
-        FileObject fileObject = Optional
-                .ofNullable(environment.getOptions().get("tsOutDir"))
-                .map(dir -> Paths.get(dir, filename))
-                .map(Safe.ofFunction(path -> filer.createResource(StandardLocation.SOURCE_OUTPUT, path.toString(), filename)))
-                .orElseGet(Safe.ofSupplier(() -> filer.createResource(StandardLocation.SOURCE_OUTPUT, "typescript", filename)));
-        try (Writer writer = fileObject.openWriter();
-             BufferedWriter bufWriter = new BufferedWriter(writer)) {
-            for (String line: content.split("\n")) {
-                bufWriter.write(line);
-                bufWriter.newLine();
-            }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
 
     private static TypeInfo convertRecursively(TypeConverter typeConverter, TypeInfo typeInfo) {
         if (typeInfo.hasEnclosingType()) {
             typeInfo = typeInfo
                     .toBuilder()
-                    .name(typeInfo.name().replaceAll("\\$", "."))
+                    .name(typeInfo.name().replace("$", ""))
                     .build();
         }
 

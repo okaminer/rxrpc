@@ -1,8 +1,8 @@
 package com.slimgears.rxrpc.sample;
 
+import com.google.common.reflect.TypeToken;
 import com.slimgears.rxrpc.client.AbstractClient;
 import com.slimgears.rxrpc.client.RxClient.Session;
-import com.slimgears.util.reflect.TypeToken;
 import io.reactivex.Completable;
 import io.reactivex.Observable;
 import java.lang.String;
@@ -19,38 +19,56 @@ public class SampleSpecializedEndpoint_RxClient extends AbstractClient implement
     }
 
     @Override
-    public Observable<String> genericMethod(String data) {
-        return invokeObservable(
-                TypeToken.of(String.class),
-                "sampleSpecializedEndpoint/genericMethod",
-                arguments()
-                        .put("data", data));
+    public Observable<String> genericMethod( String data) {
+        return invokeObservable(InvocationInfo
+            .builder(TypeToken.of(String.class))
+            .method("sampleSpecializedEndpoint/genericMethod")
+            .shared(false)
+            .sharedReplayCount(0)
+            .arg("data", data)
+            .build());
     }
 
     @Override
-    public Observable<SampleGenericData<String>> genericDataMethod(String request) {
-        return invokeObservable(
-                new TypeToken<SampleGenericData<String>>(){},
-                "sampleSpecializedEndpoint/genericDataMethod",
-                arguments()
-                        .put("request", request));
+    public Observable<SampleGenericData<String>> genericDataMethod( String request) {
+        return invokeObservable(InvocationInfo
+            .builder(new TypeToken<SampleGenericData<String>>(){})
+            .method("sampleSpecializedEndpoint/genericDataMethod")
+            .shared(false)
+            .sharedReplayCount(0)
+            .arg("request", request)
+            .build());
     }
 
     @Override
     public Observable<SampleGenericList<String>> genericListMethod() {
-        return invokeObservable(
-                new TypeToken<SampleGenericList<String>>(){},
-                "sampleSpecializedEndpoint/genericListMethod",
-                arguments());
+        return invokeObservable(InvocationInfo
+            .builder(new TypeToken<SampleGenericList<String>>(){})
+            .method("sampleSpecializedEndpoint/genericListMethod")
+            .shared(false)
+            .sharedReplayCount(0)
+        .build());
     }
 
     @Override
-    public Completable genericInputDataMethod(SampleGenericData<String> data) {
-        return invokeCompletable(
-                TypeToken.of(Void.class),
-                "sampleSpecializedEndpoint/genericInputDataMethod",
-                arguments()
-                        .put("data", data));
+    public Completable genericInputDataMethod( SampleGenericData<String> data) {
+        return invokeCompletable(InvocationInfo
+            .builder(TypeToken.of(Void.class))
+            .method("sampleSpecializedEndpoint/genericInputDataMethod")
+            .shared(false)
+            .sharedReplayCount(0)
+            .arg("data", data)
+            .build());
+    }
+
+    @Override
+    public Observable<SampleSpecializedData> data() {
+        return invokeObservable(InvocationInfo
+            .builder(TypeToken.of(SampleSpecializedData.class))
+            .method("sampleSpecializedEndpoint/data")
+            .shared(false)
+            .sharedReplayCount(0)
+        .build());
     }
 
 }

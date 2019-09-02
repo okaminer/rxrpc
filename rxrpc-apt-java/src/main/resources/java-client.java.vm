@@ -5,29 +5,32 @@ $imports
 
 #set ($simpleClassName = $imports.use($targetClass.name()))
 #macro (invoke $method)##
-    #set ($type = $method.returnType())##
-    #if ($utils.isKnownAsyncType($type))##
-        invoke${type.simpleName()}(
-            #classLiteral($type.elementTypeOrVoid()),
-            "$endpointName/$method.name()",
-            arguments()##
-    #else##
-        invokeBlocking(
-            #classLiteral($type),
-            "$endpointName/$method.name()",
-            arguments()##
-    #end##
+    #set ($type = $method.returnType())
+    #set ($asyncType = "Blocking")
+    #set ($returnType = $type)
+    #if ($utils.isKnownAsyncType($type))
+        #set ($asyncType = $type.simpleName())
+        #set ($returnType = $type.elementTypeOrVoid())
+    #end
+        invoke${asyncType}(InvocationInfo
+            .builder(#classLiteral($returnType))
+            .method("$endpointName/$method.name()")
+            .shared($utils.isShared($method))
+            .sharedReplayCount($utils.getSharedReplayCount($method))
 ##
-    #foreach($p in $method.params())##
+    #foreach($p in $method.params())
+            .arg("$p.name()", $p.name())
+    #end
+        .build())##
+#end##
 
-                .put("$p.name()", $p.name())##
-    #end)##
+#macro (annotate $annotations)##
+    #foreach($a in $annotations)$a.asString()#if ($foreach.hasNext) #end#end##
 #end##
 
 #macro (params $method)##
-    #foreach ($p in $m.params())$[$p.type()] $p.name()#if ($foreach.hasNext), #{end}#end
+    #foreach ($p in $m.params())#annotate($p.annotations()) $[$p.type()] $p.name()#if ($foreach.hasNext), #{end}#end
 #end
-
 
 /**
  * Generated from $sourceClass.name()

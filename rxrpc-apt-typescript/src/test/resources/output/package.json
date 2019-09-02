@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "author": "RxRpc Generated module",
   "private": true,
   "scripts": {
@@ -12,9 +13,9 @@
     "typescript": "^3.0.1"
   },
   "dependencies": {
-    "@angular/core": "^6.0.3",
+    "@angular/core": "^7.0.0",
     "rxjs": "^6.0.0",
-    "ng-rxrpc": "^0.2.2"
+    "rxrpc-js": "^0.5.2"
   },
   "files": ["*.ts", "*.json", "dist/*"]
 }
